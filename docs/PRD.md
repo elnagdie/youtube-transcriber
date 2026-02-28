@@ -1,6 +1,6 @@
 # YouTube Transcriber — Product Requirements Document
 
-**Version:** 1.0 (MVP)
+**Version:** 1.1
 **Date:** 2026-02-27
 **Repo:** [elnagdie/youtube-transcriber](https://github.com/elnagdie/youtube-transcriber)
 
@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-YouTube Transcriber is a web application that extracts transcripts from YouTube videos, playlists, and channels. Users paste a URL and receive a clean, formatted transcript they can copy to clipboard or download as a markdown file. The app supports batch transcription of entire playlists and channels with progressive display.
+YouTube Transcriber is a web application that extracts transcripts from YouTube videos, playlists, and channels. Users paste a URL and receive a clean, formatted transcript with timestamped segments they can copy to clipboard or download as a markdown file. The app supports batch transcription of entire playlists and channels with progressive display.
 
 ---
 
@@ -44,12 +44,13 @@ With a transcript, an AI-enabled user can instead:
 3. Clicks "Transcribe"
 4. App shows a loading state with progress indicator
 5. Transcript appears with the video title, channel name, and duration as metadata
-6. User can:
+6. Each line has a clickable `[MM:SS]` timestamp that opens YouTube at that moment
+7. User can:
    - Copy transcript to clipboard (button)
    - Download as `.md` file
    - Use "Format for LLM" to wrap transcript in a prompt template
-   - Search within the transcript (Ctrl+F style)
-7. Collapsible "Dev Notes" panel shows technical details
+   - Search within the transcript with highlighted results
+8. Collapsible "Dev Notes" panel shows technical details
 
 ### Flow 2: Playlist/Channel Batch Transcription
 
@@ -65,7 +66,7 @@ With a transcript, an AI-enabled user can instead:
 ### Flow 3: LLM-Ready Formatting
 
 1. After a transcript loads, user clicks "Format for LLM"
-2. A modal/panel shows preset prompt templates:
+2. A modal shows preset prompt templates:
    - "Extract step-by-step instructions from this tutorial"
    - "Summarize the key points"
    - "Create a quiz based on this content"
@@ -85,23 +86,23 @@ With a transcript, an AI-enabled user can instead:
 - Uses Server-Sent Events (SSE) for progressive playlist updates — backend streams transcript results as they complete
 - Dark mode via CSS variables + toggle
 
-### Backend (FastAPI on Railway/Render)
+### Backend (FastAPI on Render)
 
 **API Endpoints:**
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/transcribe` | POST | Accepts a single video URL, returns transcript |
+| `/api/health` | GET | Health check |
+| `/api/transcribe` | POST | Accepts a single video URL, returns transcript with timestamped segments |
 | `/api/batch` | POST | Accepts playlist/channel URL, returns SSE stream of transcripts |
 | `/api/detect` | POST | Accepts any YouTube URL, returns type (video/playlist/channel) and metadata |
 
 ### Transcription Pipeline
 
 1. Use `yt-dlp` to extract video metadata and check for available captions
-2. If captions exist -> extract them directly (fast, ~1-2 seconds)
-3. If no captions -> download audio via `yt-dlp`, transcribe with local Whisper (`whisper-small` model)
-4. Format transcript as clean text with optional timestamps
-5. Return as JSON:
+2. Find the json3 caption format URL from subtitle data (prefers manual captions over auto-generated)
+3. Fetch json3 data directly via URL and parse into timestamped segments
+4. Return as JSON:
 
 ```json
 {
@@ -109,11 +110,18 @@ With a transcript, an AI-enabled user can instead:
   "channel": "Channel Name",
   "duration": "12:34",
   "language": "en",
-  "transcript": "Full transcript text...",
-  "source": "captions | whisper",
+  "transcript": "Full plain text...",
+  "segments": [
+    {"time": 0, "text": "welcome to this tutorial"},
+    {"time": 15, "text": "today we'll be building..."}
+  ],
+  "video_id": "dQw4w9WgXcQ",
+  "source": "captions",
   "processing_time_seconds": 2.3
 }
 ```
+
+**Note:** Videos without captions (manual or auto-generated) will return a 404 error. There is no audio transcription fallback.
 
 ### Batch Pipeline
 
@@ -124,7 +132,7 @@ With a transcript, an AI-enabled user can instead:
 
 ### Rate Limiting
 
-- IP-based rate limiting via FastAPI middleware
+- IP-based rate limiting via FastAPI middleware (slowapi)
 - Single video: 30 requests/hour per IP
 - Batch: 5 requests/hour per IP
 
@@ -136,8 +144,8 @@ With a transcript, an AI-enabled user can instead:
 
 - Single video transcription (URL input)
 - Playlist/channel batch transcription with progressive display
-- YouTube captions extraction (primary method)
-- Local Whisper fallback (`whisper-small` model)
+- YouTube captions extraction via yt-dlp (json3 format)
+- Timestamped segments with clickable YouTube links
 - Copy transcript to clipboard
 - Download as `.md` file
 - Download all (single `.md` or `.zip` for batch)
@@ -145,8 +153,8 @@ With a transcript, an AI-enabled user can instead:
 ### Enhancements
 
 - LLM-ready formatting with preset prompt templates
-- Multi-language support (auto-detect via yt-dlp/Whisper)
-- Search within transcript (client-side text search)
+- Multi-language support (auto-detect via yt-dlp)
+- Search within transcript with highlighted results
 - Dark mode toggle
 - Collapsible "Dev Notes" panel per transcript
 
@@ -154,12 +162,10 @@ With a transcript, an AI-enabled user can instead:
 
 Each transcript card includes a collapsible "Dev Notes" section showing:
 
-- **Transcription source:** YouTube Captions or Whisper
-- **Whisper model:** Model name and size (if Whisper was used)
+- **Transcription source:** YouTube Captions
 - **Language detected:** Auto-detected language code
-- **Processing time:** Time taken to extract/transcribe
+- **Processing time:** Time taken to extract
 - **API endpoint:** Which endpoint was called
-- **Rate limit status:** Remaining requests in current window
 
 ---
 
@@ -167,12 +173,11 @@ Each transcript card includes a collapsible "Dev Notes" section showing:
 
 - User authentication (Google/GitHub OAuth)
 - Transcript history / saved library
-- Clickable timestamps with video seek links
 - Export to `.srt`, `.json`, `.pdf`, `.txt`
 - Public API for developers (with API keys and rate limiting)
 - Browser extension for one-click transcription
-- Custom Whisper model selection
 - Webhook/notification for long batch jobs
+- Speaker diarization (when YouTube adds support)
 
 ---
 
@@ -182,12 +187,11 @@ Each transcript card includes a collapsible "Dev Notes" section showing:
 |----------|----------|
 | Invalid/malformed URL | Client-side validation before API call. Show inline error message. |
 | Private/age-restricted video | yt-dlp returns error. Show "This video is private or restricted." |
-| Video has no captions + Whisper fails | Show error with reason. Suggest trying a different video. |
-| Playlist with 500+ videos | Show warning: "This playlist has X videos. Processing may take a while." Allow user to proceed or cancel. |
+| Video has no captions | Show "No captions available for this video." |
+| Playlist with 500+ videos | Show warning: "This playlist has X videos. Processing may take a while." Allow user to proceed. |
 | Deleted/unavailable video in playlist | Skip it, show a "skipped" indicator in the batch results with the reason. |
-| Rate limit exceeded | Return HTTP 429 with friendly message and time until rate limit resets. |
-| Server timeout (long Whisper transcription) | Timeout at 10 minutes per video. Show progress indicator. If exceeded, return partial result or error. |
-| yt-dlp blocked by YouTube | Return clear error message. Suggest retrying later. Log for monitoring. |
+| Rate limit exceeded | Return HTTP 429 with friendly message. |
+| yt-dlp blocked by YouTube | Return clear error message. Suggest retrying later. |
 | Non-YouTube URL | Validate URL is youtube.com or youtu.be. Reject others with "Only YouTube URLs are supported." |
 
 ---
@@ -197,9 +201,8 @@ Each transcript card includes a collapsible "Dev Notes" section showing:
 | Requirement | Target |
 |-------------|--------|
 | Caption-based transcription response time | < 5 seconds |
-| Whisper transcription time | < 2x video duration (e.g. 10-min video in < 20 min) |
 | Concurrent users | 50+ simultaneous |
-| Uptime | 99% (dependent on Railway/Render SLA) |
+| Uptime | 99% (dependent on Render SLA) |
 | Frontend load time | < 2 seconds (Lighthouse score > 90) |
 | Mobile responsive | Yes |
 
@@ -209,9 +212,8 @@ Each transcript card includes a collapsible "Dev Notes" section showing:
 
 | Component | Technology | Hosting |
 |-----------|-----------|---------|
-| Frontend | Next.js (App Router) | Netlify |
-| Backend | Python FastAPI | Railway or Render |
-| Transcription (primary) | yt-dlp (caption extraction) | Backend server |
-| Transcription (fallback) | Whisper (whisper-small, local) | Backend server |
+| Frontend | Next.js (App Router, TypeScript, Tailwind CSS) | Netlify |
+| Backend | Python FastAPI | Render |
+| Transcription | yt-dlp (caption extraction, json3 format) | Backend server |
 | Real-time updates | Server-Sent Events (SSE) | Backend -> Frontend |
-| Rate limiting | FastAPI middleware (IP-based) | Backend server |
+| Rate limiting | slowapi (IP-based) | Backend server |

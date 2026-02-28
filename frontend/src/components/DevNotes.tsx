@@ -24,12 +24,6 @@ export default function DevNotes({ transcript, endpoint }: Props) {
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
             <dt className="text-[var(--muted)]">Source</dt>
             <dd className="font-mono">{transcript.source}</dd>
-            {transcript.source === "whisper" && (
-              <>
-                <dt className="text-[var(--muted)]">Whisper model</dt>
-                <dd className="font-mono">whisper-small</dd>
-              </>
-            )}
             <dt className="text-[var(--muted)]">Language</dt>
             <dd className="font-mono">{transcript.language}</dd>
             <dt className="text-[var(--muted)]">Processing time</dt>
