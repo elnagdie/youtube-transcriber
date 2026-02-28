@@ -3,14 +3,16 @@ import { useState } from "react";
 import URLInput from "@/components/URLInput";
 import ThemeToggle from "@/components/ThemeToggle";
 import PlaylistPreview from "@/components/PlaylistPreview";
-import { detectURL } from "@/lib/api";
-import type { DetectResponse } from "@/lib/types";
+import TranscriptCard from "@/components/TranscriptCard";
+import { detectURL, transcribeVideo } from "@/lib/api";
+import type { DetectResponse, TranscriptResponse } from "@/lib/types";
 
 type AppState = "idle" | "detecting" | "detected" | "transcribing" | "done" | "error";
 
 export default function Home() {
   const [state, setState] = useState<AppState>("idle");
   const [detection, setDetection] = useState<DetectResponse | null>(null);
+  const [transcript, setTranscript] = useState<TranscriptResponse | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
   const [currentURL, setCurrentURL] = useState("");
 
@@ -19,24 +21,27 @@ export default function Home() {
     setState("detecting");
     setErrorMsg("");
     setDetection(null);
+    setTranscript(null);
     try {
       const result: DetectResponse = await detectURL(url);
       setDetection(result);
       if (result.type === "video") {
         setState("transcribing");
-        // single video transcription wired in Task 6
+        const tx: TranscriptResponse = await transcribeVideo(url);
+        setTranscript(tx);
+        setState("done");
       } else {
         setState("detected");
       }
     } catch (e: unknown) {
-      setErrorMsg(e instanceof Error ? e.message : "Failed to detect URL.");
+      setErrorMsg(e instanceof Error ? e.message : "Something went wrong.");
       setState("error");
     }
   }
 
   function handleTranscribeAll() {
     setState("transcribing");
-    // batch transcription wired in Task 7
+    // batch wired in Task 7
   }
 
   return (
@@ -61,6 +66,9 @@ export default function Home() {
         {state === "detecting" && (
           <p className="mt-6 text-center text-sm text-[var(--muted)]">Detecting URL type...</p>
         )}
+        {state === "transcribing" && !detection?.type?.includes("playlist") && !detection?.type?.includes("channel") && (
+          <p className="mt-6 text-center text-sm text-[var(--muted)]">Transcribing... this may take a moment.</p>
+        )}
 
         {state === "error" && (
           <div className="mt-6 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-400">
@@ -68,13 +76,15 @@ export default function Home() {
           </div>
         )}
 
-        {detection && (detection.type === "playlist" || detection.type === "channel") && (
+        {detection && (detection.type === "playlist" || detection.type === "channel") && state !== "transcribing" && (
           <PlaylistPreview
             detection={detection}
             onTranscribeAll={handleTranscribeAll}
-            loading={state === "transcribing"}
+            loading={false}
           />
         )}
+
+        {transcript && <TranscriptCard transcript={transcript} />}
       </main>
     </div>
   );
