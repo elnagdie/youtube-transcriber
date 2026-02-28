@@ -14,6 +14,8 @@ export interface TranscriptResponse {
   duration: string;
   language: string;
   transcript: string;
+  segments: { time: number; text: string }[];
+  video_id: string;
   source: "captions" | "whisper";
   processing_time_seconds: number;
 }
@@ -28,6 +30,8 @@ export interface BatchEvent {
   duration?: string;
   language?: string;
   transcript?: string;
+  segments?: { time: number; text: string }[];
+  video_id?: string;
   source?: "captions" | "whisper";
   processing_time_seconds?: number;
   error?: string;

@@ -2,8 +2,7 @@ import asyncio
 import json
 import re
 import time
-import tempfile
-import os
+import urllib.request
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
@@ -54,97 +53,95 @@ def format_duration(seconds: int) -> str:
     return f"{minutes}:{secs:02d}"
 
 
-def parse_vtt(filepath: str) -> str:
-    with open(filepath, "r", encoding="utf-8") as f:
-        content = f.read()
-
-    lines = content.split("\n")
-    text_lines = []
-    seen = set()
-
-    for line in lines:
-        line = line.strip()
-        if (
-            not line
-            or line.startswith("WEBVTT")
-            or line.startswith("Kind:")
-            or line.startswith("Language:")
-            or "-->" in line
-            or line.replace(".", "").replace(":", "").isdigit()
-        ):
-            continue
-        clean = re.sub(r"<[^>]+>", "", line).strip()
-        if clean and clean not in seen:
-            seen.add(clean)
-            text_lines.append(clean)
-
-    return " ".join(text_lines)
-
-
 def extract_transcript(url: str) -> dict:
-    """Extract captions from a YouTube video using yt-dlp."""
+    """Extract captions from a YouTube video using yt-dlp with json3 format."""
     start_time = time.time()
 
-    # Single yt-dlp call: get metadata and download subtitles in one pass
-    with tempfile.TemporaryDirectory() as tmpdir:
-        ydl_opts = {
-            "skip_download": True,
-            "writesubtitles": True,
-            "writeautomaticsub": True,
-            "subtitleslangs": ["en", "en-orig", "en-US"],
-            "subtitlesformat": "vtt",
-            "outtmpl": os.path.join(tmpdir, "%(id)s"),
-            "quiet": True,
-            "no_warnings": True,
-        }
+    ydl_opts = {
+        "skip_download": True,
+        "quiet": True,
+        "no_warnings": True,
+    }
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
 
-            title = info.get("title", "Unknown")
-            channel = info.get("channel", info.get("uploader", "Unknown"))
-            duration_secs = info.get("duration", 0)
-            duration = format_duration(duration_secs) if duration_secs else "Unknown"
+        title = info.get("title", "Unknown")
+        channel = info.get("channel", info.get("uploader", "Unknown"))
+        duration_secs = info.get("duration", 0)
+        duration = format_duration(duration_secs) if duration_secs else "Unknown"
+        video_id = info.get("id", "")
 
-            # Check what captions are available
-            subtitles = info.get("subtitles", {})
-            auto_captions = info.get("automatic_captions", {})
+        subtitles = info.get("subtitles", {})
+        auto_captions = info.get("automatic_captions", {})
 
-            language = None
-            for lang in ["en", "en-orig", "en-US"]:
-                if lang in subtitles or lang in auto_captions:
-                    language = lang
-                    break
-
-            if language is None:
-                if subtitles:
-                    language = next(iter(subtitles))
-                elif auto_captions:
-                    language = next(iter(auto_captions))
-
-            if language is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail="No captions available for this video.",
-                )
-
-            # Now download the subtitles
-            ydl_opts["subtitleslangs"] = [language]
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl2:
-                ydl2.download([url])
-
-        # Find and parse the VTT file
-        transcript_text = ""
-        for f in os.listdir(tmpdir):
-            if f.endswith(".vtt"):
-                transcript_text = parse_vtt(os.path.join(tmpdir, f))
+        # Find best language
+        language = None
+        caption_list = None
+        for lang in ["en", "en-orig", "en-US"]:
+            if lang in subtitles:
+                language = lang
+                caption_list = subtitles[lang]
+                break
+            if lang in auto_captions:
+                language = lang
+                caption_list = auto_captions[lang]
                 break
 
-        if not transcript_text:
+        if language is None:
+            if subtitles:
+                language = next(iter(subtitles))
+                caption_list = subtitles[language]
+            elif auto_captions:
+                language = next(iter(auto_captions))
+                caption_list = auto_captions[language]
+
+        if language is None or not caption_list:
             raise HTTPException(
                 status_code=404,
                 detail="No captions available for this video.",
             )
+
+        # Find json3 format URL
+        json3_url = None
+        for fmt in caption_list:
+            if fmt.get("ext") == "json3":
+                json3_url = fmt.get("url")
+                break
+
+        if not json3_url:
+            raise HTTPException(
+                status_code=404,
+                detail="No json3 caption format available.",
+            )
+
+        # Fetch and parse json3 data
+        with urllib.request.urlopen(json3_url) as resp:
+            json3_data = json.loads(resp.read().decode("utf-8"))
+
+        segments = []
+        seen_texts = set()
+        for event in json3_data.get("events", []):
+            segs = event.get("segs")
+            if not segs:
+                continue
+            text = "".join(s.get("utf8", "") for s in segs).strip()
+            text = re.sub(r"\s+", " ", text)
+            if not text or text == "\n":
+                continue
+            if text in seen_texts:
+                continue
+            seen_texts.add(text)
+            time_sec = int(event.get("tStartMs", 0) / 1000)
+            segments.append({"time": time_sec, "text": text})
+
+        if not segments:
+            raise HTTPException(
+                status_code=404,
+                detail="No captions available for this video.",
+            )
+
+        transcript_text = " ".join(seg["text"] for seg in segments)
 
         return {
             "title": title,
@@ -152,6 +149,8 @@ def extract_transcript(url: str) -> dict:
             "duration": duration,
             "language": language,
             "transcript": transcript_text,
+            "segments": segments,
+            "video_id": video_id,
             "source": "captions",
             "processing_time_seconds": round(time.time() - start_time, 2),
         }

@@ -10,6 +10,37 @@ interface Props {
   endpoint?: string;
 }
 
+function formatTimestamp(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h > 0) return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function highlightText(text: string, search: string) {
+  if (!search.trim()) return text;
+  const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`(${escaped})`, "gi");
+  const parts = text.split(regex);
+  return (
+    <>
+      {parts.map((part, i) =>
+        regex.test(part) ? (
+          <mark
+            key={i}
+            className="bg-yellow-300 text-black dark:bg-yellow-600 dark:text-white"
+          >
+            {part}
+          </mark>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+    </>
+  );
+}
+
 export default function TranscriptCard({
   transcript,
   endpoint = "/api/transcribe",
@@ -25,26 +56,32 @@ export default function TranscriptCard({
   }
 
   function renderTranscript() {
-    if (!search.trim()) return transcript.transcript;
-    const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const regex = new RegExp(`(${escaped})`, "gi");
-    const parts = transcript.transcript.split(regex);
-    return (
-      <>
-        {parts.map((part, i) =>
-          regex.test(part) ? (
-            <mark
-              key={i}
-              className="bg-yellow-300 text-black dark:bg-yellow-600 dark:text-white"
-            >
-              {part}
-            </mark>
-          ) : (
-            <span key={i}>{part}</span>
-          )
-        )}
-      </>
-    );
+    const segments = transcript.segments;
+    const videoId = transcript.video_id;
+
+    if (segments && segments.length > 0 && videoId) {
+      return (
+        <div className="space-y-3">
+          {segments.map((seg, i) => (
+            <div key={i} className="flex gap-3">
+              <a
+                href={`https://youtube.com/watch?v=${videoId}&t=${seg.time}s`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="shrink-0 font-mono text-xs text-[var(--accent)] hover:underline"
+                style={{ minWidth: "3.5rem" }}
+              >
+                [{formatTimestamp(seg.time)}]
+              </a>
+              <span>{highlightText(seg.text, search)}</span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // Fallback: flat transcript (no segments)
+    return highlightText(transcript.transcript, search);
   }
 
   return (

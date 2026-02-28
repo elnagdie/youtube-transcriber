@@ -74,6 +74,8 @@ export default function Home() {
             duration: event.duration ?? "",
             language: event.language ?? "",
             transcript: event.transcript ?? "",
+            segments: event.segments ?? [],
+            video_id: event.video_id ?? "",
             source: event.source ?? "captions",
             processing_time_seconds: event.processing_time_seconds ?? 0,
             index: event.index ?? 0,

@@ -35,3 +35,6 @@ whisper/
 # Temp files
 *.tmp
 *.log
+
+# Local Netlify folder
+.netlify
