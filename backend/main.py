@@ -213,6 +213,14 @@ def parse_vtt(filepath: str) -> str:
 
 def transcribe_with_whisper(url: str) -> dict:
     """Download audio and transcribe with local Whisper model."""
+    try:
+        import whisper  # noqa: F401
+    except ImportError:
+        raise HTTPException(
+            status_code=501,
+            detail="Whisper is not available on this server. This video has no captions and cannot be transcribed.",
+        )
+
     start_time = time.time()
 
     with tempfile.TemporaryDirectory() as tmpdir:
